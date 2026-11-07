@@ -11,5 +11,6 @@ export const testCoverageAnalyzer: AgentDefinition = {
   prompt: TEST_COVERAGE_ANALYZER_PROMPT,
   // GitHub tools let it look for existing test files outside the PR
   tools: ['mcp__github__search_code', 'mcp__github__get_file_contents'],
-  model: 'sonnet'
+  // Inherit ANTHROPIC_MODEL: this SDK maps the 'sonnet' alias to a retired model ID
+  model: 'inherit'
 };

@@ -56,8 +56,8 @@ async function main() {
   if (!process.env.ANTHROPIC_MODEL) {
     fail(
       'ANTHROPIC_MODEL is not set. Add it to .env:\n' +
-      '   Anthropic API: ANTHROPIC_MODEL=claude-sonnet-4-5-20250929\n' +
-      '   AWS Bedrock:   ANTHROPIC_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+      '   Anthropic API: ANTHROPIC_MODEL=claude-sonnet-5-5\n' +
+      '   AWS Bedrock:   ANTHROPIC_MODEL=<Bedrock model ID, e.g. us.anthropic.claude-...-v1:0>'
     );
   }
 

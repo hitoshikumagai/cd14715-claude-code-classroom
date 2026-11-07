@@ -11,15 +11,17 @@ Review pull request #${prNumber} in ${owner}/${repo}.
 - Use mcp__github__get_pull_request to read the PR title and description.
 - Use mcp__github__get_pull_request_files to list changed files with their patches (diffs).
 - Skip files that are deleted, binary, lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml), generated, or vendored.
-- For each remaining file, use mcp__github__get_file_contents to get its full content at the PR's head ref.
+- For each remaining file, use mcp__github__get_file_contents with ref set to the PR's head commit SHA (head.sha). Do not use the head branch name: it may live on a fork.
 
 ## Step 2: Analyze every file with all 3 subagents IN PARALLEL
-For each file, launch these three Task calls in the same turn so they run concurrently:
+Launch every Agent call for every file in ONE message, each with run_in_background set to false.
+Calls in the same message run concurrently, and with run_in_background false each call returns the subagent's result directly, so you never need to wait or poll.
+Launch each (file, subagent) pair exactly once. For each file:
 - subagent_type "code-quality-analyzer"
 - subagent_type "test-coverage-analyzer"
 - subagent_type "refactoring-suggester"
 
-Each Task prompt must include: the repository (${owner}/${repo}), the PR head ref, the file path, the full file content, the file's patch, and the list of all changed file paths.
+Each Agent prompt must include: the repository (${owner}/${repo}), the PR head commit SHA, the file path, the full file content, the file's patch, and the list of all changed file paths.
 Each subagent replies with a JSON object. Use its fields as-is; do not rewrite their findings.
 If a subagent fails or returns invalid JSON, retry it once. If it fails again, use an empty result for that analyzer (empty arrays, score/coverage 0, summary "Analysis failed").
 

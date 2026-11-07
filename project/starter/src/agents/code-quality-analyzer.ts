@@ -10,7 +10,8 @@ export const codeQualityAnalyzer: AgentDefinition = {
   description:
     'Reviews a single PR file for security vulnerabilities, performance problems, bug risks, and maintainability issues. Returns severity-leveled issues and a 0-100 quality score as JSON.',
   prompt: CODE_QUALITY_ANALYZER_PROMPT,
-  // Skill loads .claude/skills/* guidance; file content arrives in the Task prompt
+  // Skill loads .claude/skills/* guidance; file content arrives in the Agent prompt
   tools: ['Skill'],
-  model: 'sonnet'
+  // Inherit ANTHROPIC_MODEL: this SDK maps the 'sonnet' alias to a retired model ID
+  model: 'inherit'
 };

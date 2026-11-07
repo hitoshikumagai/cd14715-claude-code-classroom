@@ -30,9 +30,12 @@ export interface OrchestratorOptions {
   estimatedTokensPerReview?: number;
 }
 
-// Read-only tools the orchestrator needs; everything else stays unavailable
+// Built-in tools the orchestrator session can see at all; MCP tools come from mcpServers
+const BUILT_IN_TOOLS = ['Agent', 'Skill'];
+
+// Tools approved without a permission prompt
 const ALLOWED_TOOLS = [
-  'Task',
+  'Agent',
   'Skill',
   'mcp__github__get_pull_request',
   'mcp__github__get_pull_request_files',
@@ -41,7 +44,35 @@ const ALLOWED_TOOLS = [
   'mcp__eslint__lint-files'
 ];
 
-const DISALLOWED_TOOLS = ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch'];
+const DISALLOWED_TOOLS = [
+  'Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch',
+  // The GitHub MCP server also exposes write tools; a review must never change the repository
+  'mcp__github__add_issue_comment',
+  'mcp__github__create_branch',
+  'mcp__github__create_issue',
+  'mcp__github__create_or_update_file',
+  'mcp__github__create_pull_request',
+  'mcp__github__create_pull_request_review',
+  'mcp__github__create_repository',
+  'mcp__github__fork_repository',
+  'mcp__github__merge_pull_request',
+  'mcp__github__push_files',
+  'mcp__github__update_issue',
+  'mcp__github__update_pull_request_branch'
+];
+
+// API errors that retrying cannot fix. Without stopping on these, the SDK keeps
+// prompting for structured output until maxTurns, on every retry.
+const FATAL_API_ERRORS = new Set([
+  'authentication_failed',
+  'oauth_org_not_allowed',
+  'account_on_hold',
+  'verification_required',
+  'billing_error',
+  'invalid_request',
+  'model_not_found',
+  'cloud_credential_error'
+]);
 
 /**
  * Main Code Review Orchestrator
@@ -128,6 +159,7 @@ export class CodeReviewOrchestrator {
         settingSources: ['project'],
         agents: subagents,
         mcpServers: mcpServersConfig,
+        tools: BUILT_IN_TOOLS,
         allowedTools: ALLOWED_TOOLS,
         disallowedTools: DISALLOWED_TOOLS,
         maxTurns: this.options.maxTurns,
@@ -140,6 +172,14 @@ export class CodeReviewOrchestrator {
       if (message.type === 'result') {
         result = message;
       } else if (message.type === 'assistant') {
+        if (message.error && FATAL_API_ERRORS.has(message.error)) {
+          // Leaving the loop closes the stream and stops the SDK session
+          throw new ReviewError(
+            `Claude API error: ${message.error}`,
+            ErrorCodes.AGENT_FAILED,
+            { apiError: message.error, retryable: false }
+          );
+        }
         for (const block of message.message.content) {
           if (block.type === 'tool_use') {
             logger.debug('Tool call', { tool: block.name });
@@ -174,7 +214,10 @@ export class CodeReviewOrchestrator {
         analyzedAt: new Date().toISOString(),
         duration: Date.now() - startedAt,
         agentVersions: Object.fromEntries(
-          Object.entries(subagents).map(([name, agent]) => [name, agent.model ?? 'inherit'])
+          Object.entries(subagents).map(([name, agent]) => [
+            name,
+            !agent.model || agent.model === 'inherit' ? this.options.model ?? 'default' : agent.model
+          ])
         )
       }
     };

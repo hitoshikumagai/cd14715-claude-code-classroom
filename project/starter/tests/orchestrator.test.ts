@@ -145,7 +145,9 @@ describe('CodeReviewOrchestrator', () => {
         'refactoring-suggester',
         'test-coverage-analyzer'
       ]);
-      expect(options.allowedTools).toContain('Task');
+      expect(options.allowedTools).toContain('Agent');
+      expect(options.tools).toEqual(['Agent', 'Skill']);
+      expect(prompt).toContain('run_in_background set to false');
       expect(prompt).toContain('IN PARALLEL');
       // Skills in .claude/skills/ are only loaded with the project setting source
       expect(options.settingSources).toEqual(['project']);
@@ -153,11 +155,11 @@ describe('CodeReviewOrchestrator', () => {
 
     it('should aggregate results into ReviewReport', async () => {
       sdkMock.responses.push([
-        { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Task' }] } },
+        { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent' }] } },
         successResult(modelReport)
       ]);
 
-      const orchestrator = new CodeReviewOrchestrator(fastOptions);
+      const orchestrator = new CodeReviewOrchestrator({ ...fastOptions, model: 'test-model' });
       const report = await orchestrator.reviewPullRequest('octo', 'demo', 42);
 
       expect(report.fileReviews.map(r => r.file)).toEqual(['src/a.ts', 'src/b.ts']);
@@ -165,9 +167,10 @@ describe('CodeReviewOrchestrator', () => {
       expect(report.metadata.analyzedAt).not.toBe('');
       expect(Number.isNaN(Date.parse(report.metadata.analyzedAt))).toBe(false);
       expect(report.metadata.agentVersions).toEqual({
-        'code-quality-analyzer': 'sonnet',
-        'test-coverage-analyzer': 'sonnet',
-        'refactoring-suggester': 'sonnet'
+        // Subagents inherit the orchestrator's model
+        'code-quality-analyzer': 'test-model',
+        'test-coverage-analyzer': 'test-model',
+        'refactoring-suggester': 'test-model'
       });
       // Slot is released and actual token usage recorded
       const status = orchestrator.rateLimiter.getStatus();
@@ -204,6 +207,20 @@ describe('CodeReviewOrchestrator', () => {
 
       expect(sdkMock.calls).toHaveLength(3);
       expect(report.pullRequest).toEqual({ owner: 'octo', repo: 'demo', number: 42 });
+    });
+
+    it('should stop immediately on a non-retryable API error', async () => {
+      sdkMock.responses.push([
+        { type: 'assistant', error: 'model_not_found', message: { content: [{ type: 'text', text: 'API Error: 404' }] } },
+        // Never reached: the orchestrator must stop at the error above
+        errorResult('error_max_turns')
+      ]);
+
+      await expect(
+        new CodeReviewOrchestrator(fastOptions).reviewPullRequest('octo', 'demo', 42)
+      ).rejects.toMatchObject({ code: 'AGENT_FAILED', message: expect.stringContaining('model_not_found') });
+      // No retries for errors that would fail the same way again
+      expect(sdkMock.calls).toHaveLength(1);
     });
 
     it('should fail when the stream ends without a result', async () => {

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   CodeQualityResultSchema,
   TestCoverageResultSchema,
@@ -38,7 +37,7 @@ export const ReviewReportSchema = z.object({
   metadata: z.object({
     analyzedAt: z.string(),
     duration: z.number(),
-    agentVersions: z.record(z.string())
+    agentVersions: z.record(z.string(), z.string())
   })
 });
 
@@ -48,18 +47,11 @@ export const ReviewReportSchema = z.object({
 export type ReviewReport = z.infer<typeof ReviewReportSchema>;
 
 type JsonSchema = Record<string, unknown>;
-const toJsonSchema = (schema: z.ZodTypeAny): JsonSchema =>
-  (zodToJsonSchema as (s: unknown, options?: unknown) => unknown)(
-    schema,
-    { $refStrategy: 'root' }
-  ) as JsonSchema;
 
 /**
  * JSON Schema for SDK structured outputs
  * Per SDK docs: https://platform.claude.com/docs/en/agent-sdk/structured-outputs
- * Use $refStrategy: 'root' to properly inline all $ref definitions
+ * Zod v4's built-in z.toJSONSchema inlines nested schemas by default.
+ * Target draft-7: the Claude Code CLI's validator rejects the default draft 2020-12 $schema
  */
-const rawSchema: JsonSchema = toJsonSchema(ReviewReportSchema);
-
-// Extract the actual schema - zodToJsonSchema may wrap it with extra properties
-export const ReviewReportJSONSchema = rawSchema;
+export const ReviewReportJSONSchema: JsonSchema = z.toJSONSchema(ReviewReportSchema, { target: 'draft-7' }) as JsonSchema;

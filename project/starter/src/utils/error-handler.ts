@@ -73,6 +73,10 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (error) {
+      // Errors marked non-retryable (bad credentials, unknown model, ...) would fail the same way again
+      if (isReviewError(error) && error.metadata?.retryable === false) {
+        throw error;
+      }
       lastError = error;
 
       // No point waiting after the final attempt

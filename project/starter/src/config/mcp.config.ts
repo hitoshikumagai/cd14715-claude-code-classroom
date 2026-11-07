@@ -30,7 +30,9 @@ export const mcpServersConfig = {
     type: 'stdio' as const,
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-github'],
-    env: { GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN || '' }
+    env: { GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN || '' },
+    // Load tools up front instead of behind ToolSearch, saving a turn per review
+    alwaysLoad: true
   },
 
   /**
