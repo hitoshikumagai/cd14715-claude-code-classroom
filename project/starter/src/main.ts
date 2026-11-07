@@ -1,7 +1,19 @@
-import * as dotenv from 'dotenv';
+// Must be the first import: ES imports are hoisted, so a later dotenv.config()
+// call would run after modules like mcp.config.ts have already read process.env
+import 'dotenv/config';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { CodeReviewOrchestrator } from './orchestrator.js';
+import { ReportGenerator } from './utils/report-generator.js';
+import { formatError } from './utils/error-handler.js';
 
-// Load environment variables
-dotenv.config();
+/**
+ * Print an error and exit with a non-zero status
+ */
+function fail(message: string): never {
+  console.error(`❌ ${message}`);
+  process.exit(1);
+}
 
 /**
  * Main entry point for the Claude Multi-Agent Code Review System
@@ -10,39 +22,85 @@ dotenv.config();
 async function main() {
   const [owner, repo, prStr] = process.argv.slice(2);
 
-  // TODO: Validate command line arguments
-  // - Check if owner, repo, and prStr are provided
-  // - Convert prStr to number and validate it's a valid integer
-  // - Exit with error message if validation fails
+  // Validate command line arguments
+  if (!owner || !repo || !prStr) {
+    fail('Usage: npm run dev -- <owner> <repo> <pr-number>\n   Example: npm run dev -- facebook react 12345');
+  }
+  const prNumber = Number(prStr);
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    fail(`PR number must be a positive integer, got "${prStr}"`);
+  }
 
-  // TODO: Validate authentication (choose ONE method)
-  // Students must have either:
-  //   - ANTHROPIC_API_KEY environment variable, OR
-  //   - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY for Bedrock
-  //
-  // If using AWS Bedrock:
-  //   - Verify AWS_REGION is set
-  //   - Log: "🔐 Using AWS Bedrock authentication"
-  // If using Anthropic API:
-  //   - Log: "🔐 Using Anthropic API authentication"
-  // If neither method is configured:
-  //   - Exit with clear error message showing both options
+  // Validate authentication (Anthropic API key or AWS Bedrock credentials)
+  const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasAwsCredentials = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
 
-  // TODO: Validate ANTHROPIC_MODEL environment variable
-  // This is REQUIRED for both authentication methods
-  // - For AWS Bedrock: us.anthropic.claude-sonnet-4-5-20250929-v1:0
-  // - For Anthropic API: claude-sonnet-4-5-20250929
-  // Exit with error if not set
+  if (hasAnthropicKey) {
+    console.log('🔐 Using Anthropic API authentication');
+  } else if (hasAwsCredentials) {
+    if (!process.env.AWS_REGION) {
+      fail('AWS_REGION must be set when using AWS Bedrock authentication');
+    }
+    // Tells the Agent SDK to route requests through Bedrock
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+    console.log('🔐 Using AWS Bedrock authentication');
+  } else {
+    fail(
+      'No authentication configured. Set ONE of these in .env:\n' +
+      '   Option 1 (Anthropic API): ANTHROPIC_API_KEY=sk-ant-...\n' +
+      '   Option 2 (AWS Bedrock):   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION'
+    );
+  }
 
-  console.log('start here', owner, repo, prStr)
+  // Validate model (required for both authentication methods)
+  if (!process.env.ANTHROPIC_MODEL) {
+    fail(
+      'ANTHROPIC_MODEL is not set. Add it to .env:\n' +
+      '   Anthropic API: ANTHROPIC_MODEL=claude-sonnet-4-5-20250929\n' +
+      '   AWS Bedrock:   ANTHROPIC_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+    );
+  }
+
+  if (!process.env.GITHUB_TOKEN) {
+    console.warn('⚠️  GITHUB_TOKEN is not set: only public repositories work, with lower GitHub rate limits');
+  }
+
+  console.log(`🔍 Reviewing ${owner}/${repo}#${prNumber} with ${process.env.ANTHROPIC_MODEL}...`);
+
   try {
-    // TODO: Create orchestrator instance
-    // TODO: Call .reviewPullRequest(owner, repo, prNumber);
-    // TODO: Generate formatted reports using ReportGenerator
-    // Hint: Use ReportGenerator to create Markdown, HTML, and JSON reports
-    // Save reports to 'reports/' directory with appropriate filenames
+    const orchestrator = new CodeReviewOrchestrator();
+    const report = await orchestrator.reviewPullRequest(owner, repo, prNumber);
+
+    // Save Markdown, HTML, and JSON reports to reports/
+    const generator = new ReportGenerator();
+    const reportsDir = path.resolve('reports');
+    await mkdir(reportsDir, { recursive: true });
+
+    const timestamp = report.metadata.analyzedAt.replace(/[:.]/g, '-');
+    const baseName = `${owner}-${repo}-pr${prNumber}-${timestamp}`;
+    const outputs: Array<[string, string]> = [
+      [`${baseName}.md`, generator.generateMarkdownReport(report)],
+      [`${baseName}.html`, generator.generateHTMLReport(report)],
+      [`${baseName}.json`, generator.generateJSONReport(report)]
+    ];
+    for (const [fileName, content] of outputs) {
+      await writeFile(path.join(reportsDir, fileName), content, 'utf8');
+    }
+
+    const { summary } = report;
+    console.log('\n✅ Review complete');
+    console.log(`   Files analyzed:            ${summary.totalFiles}`);
+    console.log(`   Overall score:             ${summary.overallScore}/100`);
+    console.log(`   Critical issues:           ${summary.criticalIssues}`);
+    console.log(`   High-priority tests:       ${summary.highPriorityTests}`);
+    console.log(`   Refactoring opportunities: ${summary.refactoringOpportunities}`);
+    console.log(`   Duration:                  ${(report.metadata.duration / 1000).toFixed(1)}s`);
+    console.log('\n📄 Reports saved:');
+    for (const [fileName] of outputs) {
+      console.log(`   ${path.join(reportsDir, fileName)}`);
+    }
   } catch (error) {
-    console.error('Error:', error);
+    fail(`Review failed: ${formatError(error)}`);
   }
 }
 
